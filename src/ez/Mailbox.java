@@ -1,5 +1,6 @@
 package ez;
 
+import jasonlib.Log;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import javax.mail.internet.InternetAddress;
 import com.sun.mail.imap.IMAPFolder;
 import com.sun.mail.imap.IMAPMessage;
 import ez.Email.Address;
+import ez.Email.Attachment;
 import ez.EmailUtils.EmailData;
 import ez.EmailUtils.FetchTextCommand;
 
@@ -119,15 +121,32 @@ public class Mailbox {
     List<Address> replyTo = convert(m.getReplyTo());
     LocalDateTime date = LocalDateTime.ofInstant(m.getSentDate().toInstant(), ZoneId.systemDefault());
     String subject = m.getSubject();
+    String body;
+    List<Attachment> attachments;
 
     EmailData data = content.get(uid);
     if (data == null) {
-      data = EmailData.none();
+      body = null;
+      attachments = null;
     } else {
       EmailUtils.parse(m, data);
+      attachments = data.attachments;
+
+      body = data.bodyText;
+      if (body == null) {
+        if (data.bodyHTML == null) {
+          Log.warn("No body for email with uid: " + uid);
+        } else {
+          // Log.info("Using html body because no plaintext available.");
+          body = data.bodyHTML;
+        }
+      } else if (body.length() == 0) {
+        Log.warn("Email has empty text: " + uid);
+      }
+
     }
 
-    return new Email(uid, messageId, date, from, to, cc, bcc, replyTo, subject, data.bodyText, data.attachments);
+    return new Email(uid, messageId, date, from, to, cc, bcc, replyTo, subject, body, attachments);
   }
 
   private final Function<javax.mail.Address, Address> converter = (javax.mail.Address a) -> {

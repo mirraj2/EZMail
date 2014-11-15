@@ -5,7 +5,6 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -13,16 +12,12 @@ import javax.mail.BodyPart;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
-import com.google.common.base.Joiner;
-import com.google.common.base.Splitter;
-import com.google.common.base.Throwables;
 import com.sun.mail.iap.Argument;
 import com.sun.mail.iap.ByteArray;
 import com.sun.mail.iap.ProtocolException;
 import com.sun.mail.iap.Response;
 import com.sun.mail.imap.IMAPFolder;
 import com.sun.mail.imap.IMAPMessage;
-import com.sun.mail.imap.IMAPNestedMessage;
 import com.sun.mail.imap.protocol.BODY;
 import com.sun.mail.imap.protocol.FetchResponse;
 import com.sun.mail.imap.protocol.IMAPProtocol;
@@ -33,7 +28,6 @@ import ez.Email.Attachment;
 class EmailUtils {
 
   private static final Session session;
-  private static final String NEXT_PART = "------=_NextPart";
 
   static {
     System.setProperty("mail.mime.base64.ignoreerrors", "true");
@@ -47,119 +41,12 @@ class EmailUtils {
   }
 
   static EmailData parse(ByteArray data) throws Exception {
-    String s = new String(data.getNewBytes());
-    if (s.contains(NEXT_PART)) {
-      try {
-        return parseMultipart(s);
-      } catch (Exception e) {
-        Log.error(s);
-        throw Throwables.propagate(e);
-      }
-    }
+    // Log.debug(new String(data.getNewBytes()));
 
     MimeMessage mm = new MimeMessage(session, data.toByteArrayInputStream());
     EmailData ret = new EmailData();
     recurse(mm, ret, true);
     return ret;
-  }
-
-  private static EmailData parseMultipart(String s) {
-    EmailData ret = new EmailData();
-    int i = s.indexOf(NEXT_PART);
-    while (i != -1) {
-      int i2 = s.indexOf('\n', i);
-      int j = s.indexOf(NEXT_PART, i + 1);
-      if (j == -1) {
-        String leftover = s.substring(i2 + 1).trim();
-        if (!leftover.isEmpty()) {
-          Log.warn("Threw out: " + leftover.length() + " bytes at the end.");
-        }
-        break;
-      }
-      String body = s.substring(i2 + 1, j);
-      parseMultipart(body, ret);
-      i = j;
-    }
-    return ret;
-  }
-
-  private static void parseMultipart(String body, EmailData data) {
-    Headers headers = parseHeaders(body);
-
-    String t = headers.contentType;
-
-    if (t == null) {
-      return;
-    }
-
-    if (headers.disposition != null && headers.disposition.equalsIgnoreCase("attachment")) {
-      Log.warn("Throwing out attachment of size: " + headers.body.length());
-      return;
-    }
-
-    if (t.contains("text/plain")) {
-      data.bodyText = headers.body;
-    } else if (t.contains("text/html")) {
-      data.bodyHTML = headers.body;
-    } else if (t.contains("multipart") || t.contains("image")) {
-      Log.warn("Throwing out " + headers.body.length() + " bytes of data.");
-    } else {
-      throw new RuntimeException("Unhandled type: " + t);
-    }
-  }
-
-  private static Headers parseHeaders(String body) {
-    Iterator<String> iter = Splitter.on('\n').trimResults().split(body).iterator();
-
-    Headers ret = new Headers();
-
-    while (true) {
-      String line = iter.next();
-      if (line.isEmpty()) {
-        break;
-      }
-      int i = line.indexOf(": ");
-      if (i != -1) {
-        String key = line.substring(0, i);
-        String value = line.substring(i + 2);
-        if (value.endsWith(";")) {
-          value = value.substring(0, value.length() - 1);
-        }
-
-        if (key.equalsIgnoreCase("content-type")) {
-          ret.contentType = value;
-        } else if (key.equalsIgnoreCase("content-transfer-encoding")) {
-          // do nothing
-        } else if (key.equalsIgnoreCase("content-disposition")) {
-          ret.disposition = value;
-        } else {
-          Log.warn("Unhandled: " + line);
-        }
-      } else {
-        int j = line.indexOf("=");
-        if (j != -1) {
-          String key = line.substring(0, j);
-          String value = line.substring(j + 1);
-          if (key.equalsIgnoreCase("charset")) {
-            ret.charset = value;
-          } else if (key.equalsIgnoreCase("boundary") || key.equalsIgnoreCase("name")) {
-            // skip
-          } else {
-            Log.warn("Unhandled: " + line);
-          }
-        } else {
-          Log.warn("Unhandled line: " + line);
-        }
-      }
-    }
-
-    ret.body = Joiner.on('\n').join(iter);
-
-    return ret;
-  }
-
-  static class Headers {
-    String contentType, charset, disposition, body;
   }
 
   static void parse(IMAPMessage message, EmailData data) {
@@ -193,6 +80,8 @@ class EmailUtils {
           bais.read(bytes);
           data.bodyHTML = new String(bytes, Charset.forName("UTF-8"));
           bais.close();
+        } else if (content instanceof MimeMultipart) {
+          recurse((MimeMultipart) content, data, download);
         } else {
           data.bodyHTML = (String) content;
         }
@@ -220,7 +109,11 @@ class EmailUtils {
         }
       } else if (type.contains("text/html")) {
         if (download) {
-          data.bodyHTML = (String) part.getContent();
+          if (part.getContent() instanceof String) {
+            data.bodyHTML = (String) part.getContent();
+          } else if (part.getContent() instanceof MimeMultipart) {
+            recurse((MimeMultipart) part.getContent(), data, download);
+          }
         }
       } else if (type.contains("multipart")) {
         recurse((MimeMultipart) part.getContent(), data, download);
@@ -228,7 +121,7 @@ class EmailUtils {
           || type.contains("octet-stream") || type.contains("application/")) {
         data.attachments.add(new Attachment(part.getFileName(), type, part.getSize()));
       } else if (type.contains("rfc822")) {
-        recurse((IMAPNestedMessage) part.getContent(), data, download);
+        recurse((MimeMessage) part.getContent(), data, download);
       } else {
         Log.warn("Unhandled multipart: " + type);
         Log.warn(disposition);
