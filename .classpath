@@ -5,5 +5,6 @@
 	<classpathentry kind="lib" path="lib/imap.jar" sourcepath="open-src/javamail-1.4.7-src.zip"/>
 	<classpathentry kind="lib" path="lib/mailapi.jar" sourcepath="open-src/javamail-1.4.7-src.zip"/>
 	<classpathentry kind="lib" path="lib/smtp.jar"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/JasonLib"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -49,13 +50,23 @@ public class Mailbox {
     }
   }
 
+  public Email get(long uid) {
+    AtomicReference<Email> ref = new AtomicReference<>();
+    get(Query.from(uid).to(uid).body(), (List<Email> emails) -> {
+      if (!emails.isEmpty()) {
+        ref.set(emails.get(0));
+      }
+    });
+    return ref.get();
+  }
+
   @SuppressWarnings("unchecked")
   public void get(Query query, Consumer<List<Email>> callback) {
     try {
       final int CHUNK_SIZE = query.includeBody ? 64 : 1024;
 
       long fromId = query.fromUID;
-      long toId = 10_000_000;
+      long toId = query.toUID;
 
       Message[] messages = folder.getMessagesByUID(fromId, toId);
 
@@ -97,11 +108,11 @@ public class Mailbox {
     long uid = folder.getUID(m);
     String messageId = m.getMessageID();
 
-    if (m.getFrom().length != 1) {
+    if (m.getFrom().length > 1) {
       throw new IllegalStateException("Expected one FROM address, but had " + m.getFrom().length);
     }
 
-    Address from = converter.apply(m.getFrom()[0]);
+    Address from = m.getFrom().length == 0 ? null : converter.apply(m.getFrom()[0]);
     List<Address> to = convert(m.getRecipients(RecipientType.TO));
     List<Address> cc = convert(m.getRecipients(RecipientType.CC));
     List<Address> bcc = convert(m.getRecipients(RecipientType.BCC));
