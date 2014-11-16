@@ -1,24 +1,35 @@
 package ez;
 
+import static com.google.common.collect.Iterables.concat;
 import java.time.LocalDateTime;
 import java.util.List;
 
 public class Email {
 
-  public final long uid;
-  public final String messageId;
-  public final LocalDateTime date;
-  public final Address from;
-  public final List<Address> to, cc, bcc, replyTo;
-  public final String subject, body;
-  public final List<Attachment> attachments;
+  public static final Address NO_ADDRESS = new Address("UNKNOWN", "Unknown");
+
+  public long id;
+  public long uid;
+  public String messageId;
+  public LocalDateTime date;
+  public Address from;
+  public List<Address> to, cc, bcc, replyTo;
+  public String subject, body;
+  public List<Attachment> attachments;
+
+  public Email(long id, long uid, LocalDateTime date, String subject) {
+    this.id = id;
+    this.uid = uid;
+    this.date = date;
+    this.subject = subject;
+  }
 
   public Email(long uid, String messageId, LocalDateTime date, Address from, List<Address> to, List<Address> cc,
       List<Address> bcc, List<Address> replyTo, String subject, String body, List<Attachment> attachments) {
     this.uid = uid;
     this.messageId = messageId;
     this.date = date;
-    this.from = from;
+    this.from = from == null ? NO_ADDRESS : from;
     this.to = to;
     this.cc = cc;
     this.bcc = bcc;
@@ -26,6 +37,19 @@ public class Email {
     this.subject = subject;
     this.body = body;
     this.attachments = attachments;
+  }
+
+  public boolean isFrom(String address) {
+    return address.equals(from.email);
+  }
+
+  public Iterable<Address> targetAddresses() {
+    return concat(to, cc, bcc);
+  }
+
+  @Override
+  public String toString() {
+    return subject;
   }
 
   public static class Address {

@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -29,24 +30,34 @@ import ez.EmailUtils.FetchTextCommand;
 
 public class Mailbox {
 
-  private final IMAPFolder folder;
+  private final String username, password;
+  private final LinkedBlockingDeque<IMAPFolder> folders = new LinkedBlockingDeque<>();
 
   public Mailbox(String username, String password) {
-    try {
-      Properties props = new Properties();
-      props.put("mail.smtp.host", "smtp.gmail.com");
-      props.put("mail.smtp.socketFactory.port", 465);
-      props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
-      props.put("mail.smtp.auth", true);
-      props.put("mail.smtp.port", 465);
+    this(username, password, 1);
+  }
 
+  public Mailbox(String username, String password, int connections) {
+    this.username = username;
+    this.password = password;
+
+    for (int i = 0; i < connections; i++) {
+      Log.debug("Opening connection " + (i + 1));
+      folders.add(openConnection());
+    }
+  }
+
+  private IMAPFolder openConnection() {
+    try {
       Session session = Session.getDefaultInstance(props);
       Store store = session.getStore("imaps");
 
       store.connect("smtp.gmail.com", username, password);
 
-      folder = (IMAPFolder) store.getFolder("[Gmail]/All Mail");
+      IMAPFolder folder = (IMAPFolder) store.getFolder("[Gmail]/All Mail");
       folder.open(Folder.READ_ONLY);
+
+      return folder;
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -62,51 +73,59 @@ public class Mailbox {
     return ref.get();
   }
 
-  @SuppressWarnings("unchecked")
   public void get(Query query, Consumer<List<Email>> callback) {
     try {
       final int CHUNK_SIZE = query.includeBody ? 64 : 1024;
 
-      long fromId = query.fromUID;
-      long toId = query.toUID;
+      IMAPFolder folder = folders.take();
+      Message[] messages = folder.getMessagesByUID(query.fromUID, query.toUID);
+      folders.add(folder);
 
-      Message[] messages = folder.getMessagesByUID(fromId, toId);
-
-      FetchProfile fp = new FetchProfile();
-      fp.add(FetchProfile.Item.ENVELOPE);
-      if (query.includeBody) {
-        fp.add(FetchProfile.Item.CONTENT_INFO);
-      }
-
-      Message[] buffer = new Message[Math.min(CHUNK_SIZE, messages.length)];
       for (int i = 0; i < messages.length; i += CHUNK_SIZE) {
-        int bufferSize = Math.min(CHUNK_SIZE, messages.length - i);
-        System.arraycopy(messages, i, buffer, 0, bufferSize);
-
-        folder.fetch(buffer, fp);
-
-        Map<Long, EmailData> content = Collections.emptyMap();
-        if (query.includeBody) {
-          long start = folder.getUID(buffer[0]);
-          long end = folder.getUID(buffer[buffer.length - 1]);
-          content = (Map<Long, EmailData>) folder.doCommand(new FetchTextCommand(start, end));
-        }
-
-        List<Email> emails = new ArrayList<>(bufferSize);
-
-        for (int j = 0; j < bufferSize; j++) {
-          Email email = toEmail((IMAPMessage) buffer[j], content);
-          emails.add(email);
-        }
-
+        Message[] buffer = Arrays.copyOfRange(messages, i,
+            i + Math.min(CHUNK_SIZE, messages.length - i));
+        List<Email> emails = fetch(buffer, query.includeBody);
         callback.accept(emails);
       }
+
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }
 
-  private Email toEmail(IMAPMessage m, Map<Long, EmailData> content) throws Exception {
+  @SuppressWarnings("unchecked")
+  private List<Email> fetch(Message[] buffer, boolean includeBody) throws Exception {
+    FetchProfile fp = new FetchProfile();
+    fp.add(FetchProfile.Item.ENVELOPE);
+    if (includeBody) {
+      fp.add(FetchProfile.Item.CONTENT_INFO);
+    }
+
+    IMAPFolder folder = folders.take();
+
+    try {
+      folder.fetch(buffer, fp);
+
+      Map<Long, EmailData> content = Collections.emptyMap();
+      if (includeBody) {
+        long start = folder.getUID(buffer[0]);
+        long end = folder.getUID(buffer[buffer.length - 1]);
+        content = (Map<Long, EmailData>) folder.doCommand(new FetchTextCommand(start, end));
+      }
+
+      List<Email> emails = new ArrayList<>(buffer.length);
+      for (int j = 0; j < buffer.length; j++) {
+        Email email = toEmail(folder, (IMAPMessage) buffer[j], content);
+        emails.add(email);
+      }
+
+      return emails;
+    } finally {
+      folders.add(folder);
+    }
+  }
+
+  private Email toEmail(IMAPFolder folder, IMAPMessage m, Map<Long, EmailData> content) throws Exception {
     long uid = folder.getUID(m);
     String messageId = m.getMessageID();
 
@@ -161,8 +180,14 @@ public class Mailbox {
     return Arrays.stream(addresses).map(converter).collect(Collectors.toList());
   }
 
-  public IMAPFolder getFolder() {
-    return folder;
+  private static final Properties props;
+  static {
+    props = new Properties();
+    props.put("mail.smtp.host", "smtp.gmail.com");
+    props.put("mail.smtp.socketFactory.port", 465);
+    props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
+    props.put("mail.smtp.auth", true);
+    props.put("mail.smtp.port", 465);
   }
 
 }
