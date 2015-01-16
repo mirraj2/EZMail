@@ -12,6 +12,7 @@ import javax.mail.BodyPart;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
+import com.google.common.base.Joiner;
 import com.sun.mail.iap.Argument;
 import com.sun.mail.iap.ByteArray;
 import com.sun.mail.iap.ProtocolException;
@@ -143,18 +144,27 @@ class EmailUtils {
 
   static class FetchTextCommand implements IMAPFolder.ProtocolCommand {
 
-    final long start, end;
+    private long start, end;
+    private List<Long> uids;
 
     public FetchTextCommand(long start, long end) {
       this.start = start;
       this.end = end;
     }
 
+    public FetchTextCommand(List<Long> uids) {
+      this.uids = uids;
+    }
+
     @Override
     public Map<Long, EmailData> doCommand(IMAPProtocol protocol) throws ProtocolException {
       Argument args = new Argument();
-      args.writeString(start + ":" + end);
-      args.writeString("BODY[]");
+      if (uids == null) {
+        args.writeString(start + ":" + end);
+      } else {
+        args.writeString(Joiner.on(',').join(uids));
+      }
+      args.writeString("BODY.PEEK[1]");
       // args.writeString("BODY[TEXT]");
       Response[] r = protocol.command("UID FETCH", args);
       Response response = r[r.length - 1];
@@ -181,5 +191,33 @@ class EmailUtils {
     }
 
   }
+
+  // public static void main(String[] args) throws Exception {
+  // Config config = Config.load("babel");
+  // Mailbox box = new Mailbox(config.get("username"), config.get("password"));
+  // IMAPFolder folder = box.getFolder();
+  // Log.debug("Connected!");
+  // folder.doCommand(new ProtocolCommand() {
+  // @Override
+  // public Object doCommand(IMAPProtocol protocol) throws ProtocolException {
+  // // protocol.capability();
+  // // Log.debug(protocol.getCapabilities());
+  // Argument args = new Argument();
+  // args.writeString("DEFLATE");
+  // Response[] resp = protocol.command("COMPRESS", args);
+  // Log.debug(resp);
+  //
+  // Argument args2 = new Argument();
+  // args2.writeString("1:10");
+  // args.writeString("BODY.PEEK[1]");
+  // // args.writeString("BODY[TEXT]");
+  // Response[] r = protocol.command("UID FETCH", args);
+  // Response response = r[r.length - 1];
+  // Log.debug(response);
+  //
+  // return null;
+  // }
+  // });
+  // }
 
 }

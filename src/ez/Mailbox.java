@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -18,9 +17,14 @@ import javax.mail.FetchProfile;
 import javax.mail.Folder;
 import javax.mail.Message;
 import javax.mail.Message.RecipientType;
+import javax.mail.PasswordAuthentication;
 import javax.mail.Session;
 import javax.mail.Store;
+import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
+import com.google.common.base.Throwables;
+import com.google.common.collect.Maps;
 import com.sun.mail.imap.IMAPFolder;
 import com.sun.mail.imap.IMAPMessage;
 import ez.Email.Address;
@@ -31,35 +35,52 @@ import ez.EmailUtils.FetchTextCommand;
 public class Mailbox {
 
   private final String username, password;
-  private final LinkedBlockingDeque<IMAPFolder> folders = new LinkedBlockingDeque<>();
+
+  private final Session session;
+  private Store store;
+  private IMAPFolder folder;
 
   public Mailbox(String username, String password) {
-    this(username, password, 1);
-  }
-
-  public Mailbox(String username, String password, int connections) {
     this.username = username;
     this.password = password;
 
-    for (int i = 0; i < connections; i++) {
-      Log.debug("Opening connection " + (i + 1));
-      folders.add(openConnection());
+    try {
+      this.session = Session.getInstance(props,  new javax.mail.Authenticator() {
+        @Override
+        protected PasswordAuthentication getPasswordAuthentication() {
+          return new PasswordAuthentication(username, password);
+        }
+      });
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
   }
 
-  private IMAPFolder openConnection() {
+  public void sendEmail(String from, String to, String subject, String text) {
     try {
-      Session session = Session.getDefaultInstance(props);
-      Store store = session.getStore("imaps");
+      Message message = new MimeMessage(session);
 
-      store.connect("smtp.gmail.com", username, password);
+      message.setFrom(new InternetAddress(from));
+      message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
+      message.setSubject(subject);
+      message.setContent(text, "text/html; charset=utf-8");
+      // message.setText(text);
 
-      IMAPFolder folder = (IMAPFolder) store.getFolder("[Gmail]/All Mail");
-      folder.open(Folder.READ_ONLY);
-
-      return folder;
+      Transport.send(message);
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      throw Throwables.propagate(e);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  public Map<Long, String> getContent(List<Long> uids) {
+    try {
+      Map<Long, EmailData> m = (Map<Long, EmailData>) getFolder().doCommand(new FetchTextCommand(uids));
+      return Maps.transformValues(m, (EmailData data) -> {
+        return data.bodyText == null ? data.bodyHTML : data.bodyText;
+      });
+    } catch (Exception e) {
+      throw Throwables.propagate(e);
     }
   }
 
@@ -75,11 +96,9 @@ public class Mailbox {
 
   public void get(Query query, Consumer<List<Email>> callback) {
     try {
-      final int CHUNK_SIZE = query.includeBody ? 64 : 1024;
+      final int CHUNK_SIZE = query.includeBody ? 128 : 1024;
 
-      IMAPFolder folder = folders.take();
-      Message[] messages = folder.getMessagesByUID(query.fromUID, query.toUID);
-      folders.add(folder);
+      Message[] messages = getFolder().getMessagesByUID(query.fromUID, query.toUID);
 
       for (int i = 0; i < messages.length; i += CHUNK_SIZE) {
         Message[] buffer = Arrays.copyOfRange(messages, i,
@@ -87,7 +106,6 @@ public class Mailbox {
         List<Email> emails = fetch(buffer, query.includeBody);
         callback.accept(emails);
       }
-
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -101,28 +119,24 @@ public class Mailbox {
       fp.add(FetchProfile.Item.CONTENT_INFO);
     }
 
-    IMAPFolder folder = folders.take();
+    IMAPFolder folder = getFolder();
 
-    try {
-      folder.fetch(buffer, fp);
+    folder.fetch(buffer, fp);
 
-      Map<Long, EmailData> content = Collections.emptyMap();
-      if (includeBody) {
-        long start = folder.getUID(buffer[0]);
-        long end = folder.getUID(buffer[buffer.length - 1]);
-        content = (Map<Long, EmailData>) folder.doCommand(new FetchTextCommand(start, end));
-      }
-
-      List<Email> emails = new ArrayList<>(buffer.length);
-      for (int j = 0; j < buffer.length; j++) {
-        Email email = toEmail(folder, (IMAPMessage) buffer[j], content);
-        emails.add(email);
-      }
-
-      return emails;
-    } finally {
-      folders.add(folder);
+    Map<Long, EmailData> content = Collections.emptyMap();
+    if (includeBody) {
+      long start = folder.getUID(buffer[0]);
+      long end = folder.getUID(buffer[buffer.length - 1]);
+      content = (Map<Long, EmailData>) folder.doCommand(new FetchTextCommand(start, end));
     }
+
+    List<Email> emails = new ArrayList<>(buffer.length);
+    for (int j = 0; j < buffer.length; j++) {
+      Email email = toEmail(folder, (IMAPMessage) buffer[j], content);
+      emails.add(email);
+    }
+
+    return emails;
   }
 
   private Email toEmail(IMAPFolder folder, IMAPMessage m, Map<Long, EmailData> content) throws Exception {
@@ -139,6 +153,7 @@ public class Mailbox {
     List<Address> bcc = convert(m.getRecipients(RecipientType.BCC));
     List<Address> replyTo = convert(m.getReplyTo());
     LocalDateTime date = LocalDateTime.ofInstant(m.getSentDate().toInstant(), ZoneId.systemDefault());
+    String inReplyTo = m.getInReplyTo();
     String subject = m.getSubject();
     String body;
     List<Attachment> attachments;
@@ -165,7 +180,7 @@ public class Mailbox {
 
     }
 
-    return new Email(uid, messageId, date, from, to, cc, bcc, replyTo, subject, body, attachments);
+    return new Email(uid, messageId, inReplyTo, date, from, to, cc, bcc, replyTo, subject, body, attachments);
   }
 
   private final Function<javax.mail.Address, Address> converter = (javax.mail.Address a) -> {
@@ -178,6 +193,27 @@ public class Mailbox {
       return Collections.emptyList();
     }
     return Arrays.stream(addresses).map(converter).collect(Collectors.toList());
+  }
+
+  public IMAPFolder getFolder() {
+    if (folder == null) {
+      synchronized (this) {
+        if (folder == null) {
+          try {
+            this.store = session.getStore("imaps");
+
+            store.connect("smtp.gmail.com", username, password);
+
+            this.folder = (IMAPFolder) store.getFolder("[Gmail]/All Mail");
+            folder.open(Folder.READ_ONLY);
+          } catch (Exception e) {
+            throw Throwables.propagate(e);
+          }
+        }
+      }
+    }
+
+    return folder;
   }
 
   private static final Properties props;
