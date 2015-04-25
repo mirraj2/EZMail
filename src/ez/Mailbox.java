@@ -36,24 +36,32 @@ public class Mailbox {
 
   private final String username, password;
 
-  private final Session session;
+  private final Properties props = new Properties();
+
+  private Session session;
   private Store store;
   private IMAPFolder folder;
 
   public Mailbox(String username, String password) {
+    this(username, password, "smtp.gmail.com");
+  }
+
+  public Mailbox(String username, String password, String mailServer) {
     this.username = username;
     this.password = password;
 
-    try {
-      this.session = Session.getInstance(props,  new javax.mail.Authenticator() {
-        @Override
-        protected PasswordAuthentication getPasswordAuthentication() {
-          return new PasswordAuthentication(username, password);
-        }
-      });
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
+    props.put("mail.smtp.host", mailServer);
+    props.put("mail.smtp.socketFactory.port", 465);
+    props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
+    props.put("mail.smtp.auth", true);
+    props.put("mail.smtp.port", 465);
+
+    this.session = Session.getInstance(props, new javax.mail.Authenticator() {
+      @Override
+      protected PasswordAuthentication getPasswordAuthentication() {
+        return new PasswordAuthentication(username, password);
+      }
+    });
   }
 
   public void sendEmail(String from, String to, String subject, String text) {
@@ -214,16 +222,6 @@ public class Mailbox {
     }
 
     return folder;
-  }
-
-  private static final Properties props;
-  static {
-    props = new Properties();
-    props.put("mail.smtp.host", "smtp.gmail.com");
-    props.put("mail.smtp.socketFactory.port", 465);
-    props.put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory");
-    props.put("mail.smtp.auth", true);
-    props.put("mail.smtp.port", 465);
   }
 
 }
