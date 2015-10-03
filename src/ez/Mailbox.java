@@ -1,6 +1,5 @@
 package ez;
 
-import jasonlib.Log;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -23,6 +22,7 @@ import javax.mail.Store;
 import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
+import ox.Log;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import com.sun.mail.imap.IMAPFolder;

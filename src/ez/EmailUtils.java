@@ -1,6 +1,5 @@
 package ez;
 
-import jasonlib.Log;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -12,6 +11,7 @@ import javax.mail.BodyPart;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
+import ox.Log;
 import com.google.common.base.Joiner;
 import com.sun.mail.iap.Argument;
 import com.sun.mail.iap.ByteArray;
