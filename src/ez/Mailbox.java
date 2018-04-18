@@ -1,5 +1,7 @@
 package ez;
 
+import static ox.util.Utils.propagate;
+
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -12,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
 import javax.mail.FetchProfile;
 import javax.mail.Folder;
 import javax.mail.Message;
@@ -22,15 +25,16 @@ import javax.mail.Store;
 import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
-import ox.Log;
-import com.google.common.base.Throwables;
+
 import com.google.common.collect.Maps;
 import com.sun.mail.imap.IMAPFolder;
 import com.sun.mail.imap.IMAPMessage;
+
 import ez.Email.Address;
 import ez.Email.Attachment;
 import ez.EmailUtils.EmailData;
 import ez.EmailUtils.FetchTextCommand;
+import ox.Log;
 
 public class Mailbox {
 
@@ -76,7 +80,7 @@ public class Mailbox {
 
       Transport.send(message);
     } catch (Exception e) {
-      throw Throwables.propagate(e);
+      throw propagate(e);
     }
   }
 
@@ -88,7 +92,7 @@ public class Mailbox {
         return data.bodyText == null ? data.bodyHTML : data.bodyText;
       });
     } catch (Exception e) {
-      throw Throwables.propagate(e);
+      throw propagate(e);
     }
   }
 
@@ -215,7 +219,7 @@ public class Mailbox {
             this.folder = (IMAPFolder) store.getFolder("[Gmail]/All Mail");
             folder.open(Folder.READ_ONLY);
           } catch (Exception e) {
-            throw Throwables.propagate(e);
+            throw propagate(e);
           }
         }
       }

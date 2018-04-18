@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<project basedir="." default="build" name="ezmail">
+    <property environment="env"/>
+	<property name="Ox.location" value="../ox"/>
+    <property name="debuglevel" value="source,lines,vars"/>
+    <property name="target" value="1.8"/>
+    <property name="source" value="1.8"/>
+    <path id="Ox.classpath">
+        <pathelement location="${Ox.location}/bin"/>
+        <pathelement location="${Ox.location}/lib/miglayout-4.0-swing.jar"/>
+        <pathelement location="${Ox.location}/lib/gson-2.3.jar"/>
+        <pathelement location="${Ox.location}/lib/guava-20.0.jar"/>
+        <pathelement location="${Ox.location}/lib/objenesis-2.1.jar"/>
+    </path>
+    <path id="ezmail.classpath">
+        <pathelement location="bin"/>
+        <pathelement location="lib/imap.jar"/>
+        <pathelement location="lib/mailapi.jar"/>
+        <pathelement location="lib/smtp.jar"/>
+    	    <path refid="Ox.classpath"/>
+    </path>
+    <target name="init">
+        <mkdir dir="bin"/>
+        <copy includeemptydirs="false" todir="bin">
+            <fileset dir="src">
+                <exclude name="**/*.java"/>
+            </fileset>
+        </copy>
+    </target>
+    <target name="clean">
+        <delete dir="bin"/>
+    </target>
+    <target depends="clean" name="cleanall"/>
+    <target depends="build-subprojects,build-project" name="build"/>
+    <target name="build-subprojects"/>
+    <target depends="init" name="build-project">
+        <echo message="${ant.project.name}: ${ant.file}"/>
+        <javac debug="true" debuglevel="${debuglevel}" destdir="bin" includeantruntime="false" source="${source}" target="${target}">
+            <src path="src"/>
+            <classpath refid="ezmail.classpath"/>
+        </javac>
+    </target>
+</project>
